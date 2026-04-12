@@ -826,9 +826,18 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
   // 0: no neutral value,
   // 1: only one of the operands is neutral value,
   // 2: both operands are neutral values
-  strb_t vfpu_tag_in, vfpu_tag_out;
+  //
+  // The tag carries {is_mask_op, mask_strobes} through the FPU pipeline.
+  // is_mask_op (MSB) records whether the instruction writes to the mask
+  // unit, so the result queue can set the mask flag correctly even if
+  // vinsn_processing_q has advanced by the time the FPU output arrives.
+  typedef struct packed {
+    logic        is_mask_op;
+    strb_t       mask_strobes;
+  } fpu_tag_t;
+  fpu_tag_t vfpu_tag_in, vfpu_tag_out;
 
-  assign vfpu_mask = vfpu_tag_out;
+  assign vfpu_mask = vfpu_tag_out.mask_strobes;
 
   // neutral value for Intraline reduction optimization
   elen_t         ntr_val;
@@ -1088,7 +1097,7 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
       .Features      (FPUFeatures      ),
       .Implementation(FPUImplementation),
       .DivSqrtSel    (DivSqrtSel       ),
-      .TagType       (strb_t           ),
+      .TagType       (fpu_tag_t        ),
       .TrueSIMDClass (TrueSIMDClass    ),
       .EnableSIMDMask(EnableSIMDMask   )
     ) i_fpnew_bulk (
@@ -1470,7 +1479,7 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
     red_mask                = '0;
 
     // Do not issue any operations
-    vfpu_tag_in             = '0;
+    vfpu_tag_in = '0;
     mfpu_state_d            = mfpu_state_q;
 
     ntr_filling_d           = ntr_filling_q;
@@ -1490,7 +1499,7 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
 
     case (mfpu_state_q)
       NO_REDUCTION: begin
-        vfpu_tag_in = mask_i;
+        vfpu_tag_in = '{is_mask_op: vinsn_issue_q.vfu == VFU_MaskUnit, mask_strobes: mask_i};
 
         // Sign injection
         unique case (vinsn_issue_q.vtype.vsew)
@@ -1680,7 +1689,10 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
               be(processed_element_cnt, vinsn_processing_q.vtype.vsew) &
                 (vinsn_processing_q.vm ? {StrbWidth{1'b1}} : unit_out_mask);
 
-          result_queue_d[result_queue_write_pnt_q].mask  = vinsn_processing_q.vfu == VFU_MaskUnit;
+          // Use the tag that traveled through fpnew alongside the data,
+          // not vinsn_processing_q which may have advanced past this
+          // instruction by the time the FPU output arrives.
+          result_queue_d[result_queue_write_pnt_q].mask  = vfpu_tag_out.is_mask_op;
 
           // Update the narrowing selector, validate the result, bump result queue pointers/counters
           if (narrowing(vinsn_processing_q.cvt_resize)) begin
@@ -1758,9 +1770,9 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
             if (processed_element_cnt > to_process_cnt_q)
               processed_element_cnt = to_process_cnt_q;
 
-            if (vfpu_tag_out == strb_t'(2))
+            if (vfpu_tag_out.mask_strobes == strb_t'(2))
               to_process_cnt_d = to_process_cnt_q + (1 << (int'(EW64) - int'(vinsn_issue_q.vtype.vsew)));
-            else if (vfpu_tag_out == '0)
+            else if (vfpu_tag_out.mask_strobes == '0)
               to_process_cnt_d = to_process_cnt_q - processed_element_cnt;
 
             result_queue_d[result_queue_write_pnt_q].wdata = vfpu_processed_result;
@@ -1798,12 +1810,12 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
             if (((vinsn_issue_q.swap_vs2_vd_op ? mfpu_operand_valid_i[2] : mfpu_operand_valid_i[1]) && intra_op_rx_cnt_q < vinsn_issue_q.vl) &&
                 (mask_valid_i || vinsn_issue_q.vm)) begin
               intra_op_rx_cnt_en   = 1'b1;
-              vfpu_tag_in          = strb_t'(1);
+              vfpu_tag_in          = '{is_mask_op: 1'b0, mask_strobes: strb_t'(1)};
             end else begin
               // If there is no data from the operand queue, send two neutral values instead.
               operand_a            = ntr_val;
               operand_c            = ntr_val;
-              vfpu_tag_in          = strb_t'(2);
+              vfpu_tag_in          = '{is_mask_op: 1'b0, mask_strobes: strb_t'(2)};
             end
             operand_b = ntr_val;
             operands_valid = 1'b1;
@@ -1854,9 +1866,9 @@ module vmfpu import ara_pkg::*; import rvv_pkg::*; import fpnew_pkg::*;
             if (vfpu_in_ready) begin
               automatic int unsigned latency = fpu_latency(vinsn_issue_q.vtype.vsew, vinsn_issue_q.op);
 
-              if (vfpu_tag_in == strb_t'(2))
+              if (vfpu_tag_in.mask_strobes == strb_t'(2))
                 issue_cnt_d = issue_cnt_q + (1 << (int'(EW64) - int'(vinsn_issue_q.vtype.vsew)));
-              else if (vfpu_tag_in == '0)
+              else if (vfpu_tag_in.mask_strobes == '0)
                 issue_cnt_d = issue_cnt_q - issue_element_cnt;
 
               // The first operation of this instruction has just been done
