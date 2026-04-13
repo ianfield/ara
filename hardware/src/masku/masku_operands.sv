@@ -32,7 +32,6 @@ module masku_operands import ara_pkg::*; import rvv_pkg::*; #(
     input masku_fu_e                        masku_fu_i,    // signal deciding from which functional unit the result should be taken from
     input pe_req_t                          vinsn_issue_i,
     input logic [idx_width(ELEN*NrLanes):0] vrf_pnt_i,
-    input logic                             alu_op_flush_i, // flush ALU/FPU spill registers on instruction boundary
 
     // Operands and operand handshake signals coming from lanes
     input  logic [NrLanes-1:0][NrMaskFUnits+2-1:0] masku_operand_valid_i,
@@ -148,12 +147,11 @@ module masku_operands import ara_pkg::*; import rvv_pkg::*; #(
                             && vinsn_issue_i.vfu == VFU_MaskUnit
                             && vinsn_issue_i.op != VID;
 
-      spill_register_flushable #(
+      spill_register #(
         .T       ( elen_t )
       ) i_spill_register_fu (
         .clk_i   (clk_i),
         .rst_ni  (rst_ni),
-        .flush_i (alu_op_flush_i),
         .valid_i (fu_input_valid),
         .ready_o (masku_operand_fu_ready[fu][lane]),
         .data_i  (masku_operands_i[lane][2 + fu]),

@@ -114,14 +114,6 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
 
   // Performs all shuffling and deshuffling of mask operands (including masks for mask instructions)
   // Furthermore, it buffers certain operands that would create long critical paths
-  // Flush ALU/FPU operand spill registers when the mask unit's issue
-  // pointer advances — prevents stale data from a previous instruction
-  // being consumed by the next comparison.
-  logic masku_alu_op_flush;
-  assign masku_alu_op_flush = vinsn_issue_valid &&
-    ((vinsn_issue.vm || vinsn_issue.vfu == VFU_MaskUnit) ? (issue_cnt_d == '0) :
-                                                           (read_cnt_d  == '0));
-
   masku_operands #(
     .NrLanes  ( NrLanes   ),
     .pe_req_t ( pe_req_t  ),
@@ -133,7 +125,6 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
     .masku_fu_i                    (            masku_operand_fu ),
     .vinsn_issue_i                 (                 vinsn_issue ),
     .vrf_pnt_i                     (                   vrf_pnt_q ),
-    .alu_op_flush_i                (          masku_alu_op_flush ),
     // Operands coming from lanes
     .masku_operand_valid_i         (       masku_operand_valid_i ),
     .masku_operand_ready_o         (       masku_operand_ready_o ),
@@ -1700,6 +1691,5 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
       vcompress_cnt_q         <= vcompress_cnt_d;
     end
   end
-
 
 endmodule : masku
