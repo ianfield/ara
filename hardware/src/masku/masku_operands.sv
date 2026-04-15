@@ -133,14 +133,6 @@ module masku_operands import ara_pkg::*; import rvv_pkg::*; #(
   end
 
   for (genvar lane = 0; lane < NrLanes; lane++) begin : gen_masku_operands_spill_regs
-    // Per-FU flushable spill registers — accept independently, flush on
-    // instruction boundary to prevent stale data from a previous instruction
-    // being consumed by the next one.
-    // Input valid is gated to all mask-unit ALU ops except VID (which
-    // generates data internally and never consumes ALU results).  VID is
-    // the only VFU_MaskUnit op where the VALU sends data (mask=1) that the
-    // mask unit does not read — blocking it here lets the lane drain the
-    // stale result without polluting the spill register.
     for (genvar fu = 0; fu < NrMaskFUnits; fu++) begin : gen_fu_spill
       logic fu_input_valid;
       assign fu_input_valid = masku_operand_valid_i[lane][2 + fu]
