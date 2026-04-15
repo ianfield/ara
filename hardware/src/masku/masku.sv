@@ -859,8 +859,6 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
         [VCPOP:VFIRST] : begin
           vcpop_operand = (!vinsn_issue.vm) ? masku_operand_alu_seq & masku_operand_m_seq : masku_operand_alu_seq;
           // VL trim: zero tail bits beyond the valid element range.
-          // Reconstruct how many elements are valid in this VRF word
-          // from the remaining count plus already-processed slices.
           for (int unsigned i = 0; i < NrLanes*DataWidth; i++) begin
             if (i >= vlen_t'(issue_cnt_q) + vlen_t'(in_ready_cnt_q) * vlen_t'(delta_elm_q))
               vcpop_operand[i] = 1'b0;
