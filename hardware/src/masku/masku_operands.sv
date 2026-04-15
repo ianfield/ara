@@ -84,24 +84,11 @@ module masku_operands import ara_pkg::*; import rvv_pkg::*; #(
   logic  [NrLanes-1:0] masku_operand_m_spill_valid;
   logic  [NrLanes-1:0] masku_operand_m_spill_ready;
 
-  // Per-FU spill registers for ALU/FPU comparison results.
-  // Each FU gets independent buffering so the VALU/VMFPU can deliver
-  // results regardless of which instruction the mask unit is currently
-  // processing.  masku_fu_i selects which buffer's output to consume.
-  elen_t [NrLanes-1:0] masku_operand_fu_data  [NrMaskFUnits];
-  logic  [NrLanes-1:0] masku_operand_fu_valid [NrMaskFUnits];
-  logic  [NrLanes-1:0] masku_operand_fu_ready [NrMaskFUnits];
-
-  // Extract non-ALU operands
+  // Extract operands from input (input comes in "shuffled form" from the lanes)
   for (genvar lane = 0; lane < NrLanes; lane++) begin
+    assign masku_operand_alu_o[lane] = masku_operands_i[lane][2 + masku_fu_i];
     assign masku_operand_vd_d[lane] = masku_operands_i[lane][1];
-    assign masku_operand_m_d[lane]  = masku_operands_i[lane][0];
-  end
-
-  // Mux spill register outputs by masku_fu_i
-  for (genvar lane = 0; lane < NrLanes; lane++) begin
-    assign masku_operand_alu_o[lane]       = masku_operand_fu_data[masku_fu_i][lane];
-    assign masku_operand_alu_valid_o[lane] = masku_operand_fu_valid[masku_fu_i][lane];
+    assign masku_operand_m_d[lane] = masku_operands_i[lane][0];
   end
 
   // ----------
@@ -133,26 +120,6 @@ module masku_operands import ara_pkg::*; import rvv_pkg::*; #(
   end
 
   for (genvar lane = 0; lane < NrLanes; lane++) begin : gen_masku_operands_spill_regs
-    for (genvar fu = 0; fu < NrMaskFUnits; fu++) begin : gen_fu_spill
-      logic fu_input_valid;
-      assign fu_input_valid = masku_operand_valid_i[lane][2 + fu]
-                            && vinsn_issue_i.vfu == VFU_MaskUnit
-                            && vinsn_issue_i.op != VID;
-
-      spill_register #(
-        .T       ( elen_t )
-      ) i_spill_register_fu (
-        .clk_i   (clk_i),
-        .rst_ni  (rst_ni),
-        .valid_i (fu_input_valid),
-        .ready_o (masku_operand_fu_ready[fu][lane]),
-        .data_i  (masku_operands_i[lane][2 + fu]),
-        .valid_o (masku_operand_fu_valid[fu][lane]),
-        .ready_i (masku_operand_alu_ready_i[lane] && (masku_fu_i == masku_fu_e'(fu))),
-        .data_o  (masku_operand_fu_data[fu][lane])
-      );
-    end : gen_fu_spill
-
     spill_register #(
       .T       ( elen_t )
     ) i_spill_register_vd (
@@ -268,20 +235,29 @@ module masku_operands import ara_pkg::*; import rvv_pkg::*; #(
     end
   end
 
-  // Sequential valid mirrors shuffled valid
-  for (genvar lane = 0; lane < NrLanes; lane++) begin
-    assign masku_operand_alu_seq_valid_o[lane] = masku_operand_alu_valid_o[lane];
-  end
+  // Control
+  for (genvar lane = 0; lane < NrLanes; lane++) begin: gen_unpack_masku_operands
+    // immediately acknowledge operands coming from functional units
+    assign masku_operand_alu_valid_o[lane] = masku_operand_valid_i[lane][2 + masku_fu_i]
+                                           && !(vinsn_issue_i.op == VID);
+  end: gen_unpack_masku_operands
 
-  // Ready signals back to lane operand queues.
-  // Each FU's spill register has independent ready — the VALU/VMFPU can
-  // deliver results at any time regardless of masku_fu_i.
+
+  // assign the operand_ready signal that goes to the lane operand queues
   always_comb begin
+    // by default, assign '0 to operand ready signals
     masku_operand_ready_o = '0;
     for (int lane = 0; lane < NrLanes; lane++) begin
-      for (int operand_fu = 0; operand_fu < NrMaskFUnits; operand_fu++)
-        masku_operand_ready_o[lane][2 + operand_fu] = masku_operand_fu_ready[operand_fu][lane];
+      // Acknowledge alu operand
+      for (int operand_fu = 0; operand_fu < NrMaskFUnits; operand_fu++) begin
+        if (vinsn_issue_i.op == VID)
+          masku_operand_ready_o[lane][2 + operand_fu] = 1'b1;
+        else
+          masku_operand_ready_o[lane][2 + operand_fu] = (masku_fu_e'(operand_fu) == masku_fu_i) && masku_operand_alu_ready_i[lane];
+      end
+      // Acknowledge vd operands
       masku_operand_ready_o[lane][1] = masku_operand_vd_lane_ready[lane];
+      // Acknowledge mask operand
       masku_operand_ready_o[lane][0] = masku_operand_m_lane_ready[lane];
     end
   end
