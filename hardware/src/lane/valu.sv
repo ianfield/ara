@@ -787,7 +787,9 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
 
       // Initialize counters and alu state if needed by the next instruction
       // After a reduction, the next instructions starts after the reduction commits
-      if (is_reduction(vinsn_queue_q.vinsn[vinsn_queue_d.issue_pnt].op) && (vinsn_queue_d.issue_cnt != '0)) begin
+      if (is_reduction(vinsn_queue_q.vinsn[vinsn_queue_d.issue_pnt].op)
+          && (vinsn_queue_d.issue_cnt != '0)
+          && (result_queue_cnt_d == '0)) begin
         // Initialize reduction-related sequential elements
         first_op_d              = 1'b1;
         reduction_rx_cnt_d      = reduction_rx_cnt_init(NrLanes, lane_id_i);
